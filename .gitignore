@@ -1,0 +1,15 @@
+# --- Terraform (IMPORTANTE: NO SUBIR NUNCA) ---
+.terraform/
+*.tfstate
+*.tfstate.backup
+.terraform.lock.hcl
+
+# --- Python & Docker Build ---
+build/
+__pycache__/
+*.pyc
+
+# --- Carpetas de librerías instaladas (Opcional pero recomendado) ---
+# Como Docker instala libs en lambda_src, evitamos subir basura
+lambda_src/*.dist-info/
+lambda_src/__pycache__/
