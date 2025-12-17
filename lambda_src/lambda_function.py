@@ -2,9 +2,8 @@ import json
 import base64
 from io import BytesIO
 from PIL import Image
-import boto3  # Librería oficial de AWS (viene incluida)
+import boto3
 
-# Inicializamos el cliente S3 fuera del handler para reusar conexiones
 s3_client = boto3.client('s3')
 
 def lambda_handler(event, context):
@@ -12,23 +11,23 @@ def lambda_handler(event, context):
     response = event['Records'][0]['cf']['response']
     headers = request['headers']
 
-    # Si la respuesta original de S3 no es 200, devolverla tal cual (ej. 404 not found)
-    if int(response['status']) >= 400:
-        return response
+    # Funcion auxiliar para inyectar headers de debug
+    def add_debug_header(res, message):
+        res['headers']['x-debug-reason'] = [{'key': 'X-Debug-Reason', 'value': message}]
+        return res
 
-    # 1. DETECTAR EL BUCKET DINÁMICAMENTE
-    # CloudFront nos dice de dónde viene la imagen en el evento
+    # 1. Validación de Status original
+    if int(response['status']) >= 400:
+        return add_debug_header(response, f"Original Status {response['status']}")
+
+    # 2. Detectar Bucket
     try:
         s3_domain = request['origin']['s3']['domainName']
-        # El dominio suele ser "nombre-bucket.s3.region.amazonaws.com"
-        # Extraemos solo el nombre del bucket:
         bucket_name = s3_domain.split('.')[0]
     except KeyError:
-        # Fallback de seguridad por si algo raro pasa con el origen
-        print("No se pudo detectar el origen S3, devolviendo original")
-        return response
+        return add_debug_header(response, "No S3 Origin Detected")
 
-    # 2. VERIFICAR SI EL CLIENTE SOPORTA WEBP
+    # 3. Verificar si pide WebP
     accept_webp = False
     if 'accept' in headers:
         for header in headers['accept']:
@@ -36,47 +35,39 @@ def lambda_handler(event, context):
                 accept_webp = True
                 break
     
-    # Si no soporta WebP, no gastamos memoria procesando, devolvemos la original
     if not accept_webp:
-        return response
+        # AQUI PUEDE ESTAR EL PROBLEMA: CloudFront no nos pasó el header Accept
+        return add_debug_header(response, "Client did not send Accept: image/webp")
 
     try:
-        # 3. OBTENER LA IMAGEN DE FORMA SEGURA (BOTO3)
-        # request['uri'] viene como "/imagen.jpg", quitamos la barra inicial
+        # 4. Obtener imagen de S3
         key = request['uri'].lstrip('/')
-        
-        # Usamos boto3 para leer el bucket privado usando el Rol de IAM de la Lambda
         s3_response = s3_client.get_object(Bucket=bucket_name, Key=key)
         image_data = s3_response['Body'].read()
 
-        # 4. PROCESAR CON PILLOW
+        # 5. Convertir
         img = Image.open(BytesIO(image_data))
         buffer = BytesIO()
-        
-        # Convertir a WebP
         img.save(buffer, format="WEBP", quality=80)
         
-        # 5. PREPARAR RESPUESTA
         buffer.seek(0)
         img_str = base64.b64encode(buffer.getvalue()).decode('utf-8')
         
-        # Limite de Lambda@Edge para el body generado es 1.3 MB
+        # 6. Validar tamaño (Limite 1.3MB)
         if len(img_str) > 1300000:
-            print("Imagen convertida muy grande, devolviendo original")
-            return response
+            return add_debug_header(response, "Generated image too big (>1.3MB)")
 
-        # Modificar la respuesta para devolver la nueva imagen
+        # 7. ÉXITO
         response['status'] = '200'
         response['statusDescription'] = 'OK'
         response['body'] = img_str
         response['bodyEncoding'] = 'base64'
         response['headers']['content-type'] = [{'key': 'Content-Type', 'value': 'image/webp'}]
-        # Importante: Variar cache por Accept header para no servir WebP a quien no lo soporta
-        response['headers']['vary'] = [{'key': 'Vary', 'value': 'Accept'}]
+        response['headers']['x-debug-reason'] = [{'key': 'X-Debug-Reason', 'value': 'Success: Converted to WebP'}]
         
         return response
 
     except Exception as e:
-        print(f"Error procesando imagen: {str(e)}")
-        # Fail Open: Si algo falla, el usuario ve la imagen original (png/jpg)
-        return response
+        print(f"Error: {str(e)}")
+        # AQUI VEREMOS LA EXCEPCION REAL EN EL NAVEGADOR
+        return add_debug_header(response, f"Error: {str(e)}")
