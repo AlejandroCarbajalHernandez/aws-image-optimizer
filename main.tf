@@ -56,7 +56,7 @@ resource "null_resource" "build_lambda_package" {
       docker run --rm -v ${path.module}/lambda_src:/var/task \
       -v ${path.module}/build:/build \
       public.ecr.aws/sam/build-python3.11:latest \
-      /bin/sh -c "pip install -r requirements.txt -t . && zip -r /build/lambda_function.zip ."
+      /bin/sh -c "pip install -r requirements.txt -t . && rm -f /build/lambda_function.zip && zip -r /build/lambda_function.zip ."
     EOT
   }
 }

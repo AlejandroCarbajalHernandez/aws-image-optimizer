@@ -1,15 +1,21 @@
-# --- Terraform (IMPORTANTE: NO SUBIR NUNCA) ---
+# --- Terraform ---
 .terraform/
 *.tfstate
 *.tfstate.backup
 .terraform.lock.hcl
 
-# --- Python & Docker Build ---
+# --- Python & Build Basura ---
 build/
 __pycache__/
 *.pyc
 
-# --- Carpetas de librerías instaladas (Opcional pero recomendado) ---
-# Como Docker instala libs en lambda_src, evitamos subir basura
+# --- IMPORTANTE: Ignorar librerías instaladas en lambda_src ---
+# Ignoramos las carpetas que crea pip al instalar
+lambda_src/bin/
+lambda_src/PIL/
+lambda_src/Pillow*
 lambda_src/*.dist-info/
 lambda_src/__pycache__/
+
+# --- Archivos del sistema (Mac) ---
+.DS_Store

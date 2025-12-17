@@ -1,69 +1,82 @@
 import json
 import base64
-import urllib.request
 from io import BytesIO
-from PIL import Image # Esta libreria la instalaremos en el paso 3
+from PIL import Image
+import boto3  # Librería oficial de AWS (viene incluida)
+
+# Inicializamos el cliente S3 fuera del handler para reusar conexiones
+s3_client = boto3.client('s3')
 
 def lambda_handler(event, context):
     request = event['Records'][0]['cf']['request']
     response = event['Records'][0]['cf']['response']
     headers = request['headers']
-    
-    # URL de tu Bucket (Fijo para evitar bucle infinito con CloudFront)
-    BUCKET_URL = "https://biblioteca-img-clientes.s3.us-west-2.amazonaws.com"
-    
-    # Si la respuesta original no es 200, devolverla tal cual
-    if response['status'] != '200':
+
+    # Si la respuesta original de S3 no es 200, devolverla tal cual (ej. 404 not found)
+    if int(response['status']) >= 400:
         return response
 
-    # Verificar si el cliente soporta WebP
+    # 1. DETECTAR EL BUCKET DINÁMICAMENTE
+    # CloudFront nos dice de dónde viene la imagen en el evento
+    try:
+        s3_domain = request['origin']['s3']['domainName']
+        # El dominio suele ser "nombre-bucket.s3.region.amazonaws.com"
+        # Extraemos solo el nombre del bucket:
+        bucket_name = s3_domain.split('.')[0]
+    except KeyError:
+        # Fallback de seguridad por si algo raro pasa con el origen
+        print("No se pudo detectar el origen S3, devolviendo original")
+        return response
+
+    # 2. VERIFICAR SI EL CLIENTE SOPORTA WEBP
     accept_webp = False
     if 'accept' in headers:
         for header in headers['accept']:
             if 'image/webp' in header['value']:
                 accept_webp = True
                 break
+    
+    # Si no soporta WebP, no gastamos memoria procesando, devolvemos la original
+    if not accept_webp:
+        return response
 
     try:
-        # 1. Obtener la imagen original directamente de S3
-        image_url = BUCKET_URL + request['uri']
+        # 3. OBTENER LA IMAGEN DE FORMA SEGURA (BOTO3)
+        # request['uri'] viene como "/imagen.jpg", quitamos la barra inicial
+        key = request['uri'].lstrip('/')
         
-        # Usamos urllib estándar para no tener que instalar 'requests' y ahorrar espacio
-        with urllib.request.urlopen(image_url) as url_response:
-            image_data = url_response.read()
+        # Usamos boto3 para leer el bucket privado usando el Rol de IAM de la Lambda
+        s3_response = s3_client.get_object(Bucket=bucket_name, Key=key)
+        image_data = s3_response['Body'].read()
 
-        # 2. Procesar imagen con Pillow
+        # 4. PROCESAR CON PILLOW
         img = Image.open(BytesIO(image_data))
         buffer = BytesIO()
         
-        # Si soporta WebP, convertimos
-        if accept_webp:
-            img.save(buffer, format="WEBP", quality=80)
-            content_type = 'image/webp'
-        else:
-            # Si no, devolvemos PNG/JPG original pero optimizado
-            original_format = img.format if img.format else 'PNG'
-            img.save(buffer, format=original_format, optimize=True)
-            content_type = response['headers']['content-type'][0]['value']
-
-        # 3. Preparar respuesta base64 para CloudFront
+        # Convertir a WebP
+        img.save(buffer, format="WEBP", quality=80)
+        
+        # 5. PREPARAR RESPUESTA
+        buffer.seek(0)
         img_str = base64.b64encode(buffer.getvalue()).decode('utf-8')
         
-        # CloudFront tiene limite de 1MB para respuestas generadas (Lambda limits)
-        if len(img_str) > 1300000: # Margen de seguridad (1.3MB en base64 es aprox 1MB binario)
-            print("Imagen muy grande, devolviendo original")
+        # Limite de Lambda@Edge para el body generado es 1.3 MB
+        if len(img_str) > 1300000:
+            print("Imagen convertida muy grande, devolviendo original")
             return response
 
-        # Actualizar headers
+        # Modificar la respuesta para devolver la nueva imagen
         response['status'] = '200'
         response['statusDescription'] = 'OK'
         response['body'] = img_str
         response['bodyEncoding'] = 'base64'
-        response['headers']['content-type'] = [{'key': 'Content-Type', 'value': content_type}]
+        response['headers']['content-type'] = [{'key': 'Content-Type', 'value': 'image/webp'}]
+        # Importante: Variar cache por Accept header para no servir WebP a quien no lo soporta
+        response['headers']['vary'] = [{'key': 'Vary', 'value': 'Accept'}]
         
         return response
 
     except Exception as e:
         print(f"Error procesando imagen: {str(e)}")
-        # En caso de error, devolvemos la respuesta original de S3 (Fail Open)
+        # Fail Open: Si algo falla, el usuario ve la imagen original (png/jpg)
         return response
