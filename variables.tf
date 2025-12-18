@@ -9,5 +9,5 @@ variable "main_region" {
 variable "bucket_name" {
   description = "El nombre único para tu nuevo bucket S3"
   type        = string
-  default     = "mi-nuevo-bucket-imagenes-ahcloud-v1" # Cambia esto por el nombre que quieras
+  default     = "mi-nuevo-bucket-imagenes-cloud-v1" # Change this to any name u want
 }

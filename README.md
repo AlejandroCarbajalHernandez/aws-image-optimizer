@@ -1,36 +1,41 @@
 # AWS Serverless Image Optimizer (Terraform + Lambda@Edge)
 
-Este proyecto despliega una infraestructura de optimización de imágenes en AWS. Intercepta peticiones en CloudFront y usa Lambda@Edge (Python) para convertir imágenes a **WebP** automáticamente si el cliente lo soporta.
+This project deploys an image optimization infrastructure on AWS. It intercepts requests in CloudFront and uses Lambda@Edge (Python) to automatically convert images to **WebP** .
 
-## 📋 Prerrequisitos
+## 📋 Prerequisites
 
-* **Docker Desktop** (Debe estar corriendo para compilar las librerías de Python).
+* **Docker Desktop** (Must be running to compile Python libraries).
 * **Terraform** (v1.0+).
-* **AWS CLI** configurado con tus credenciales (`aws configure`).
+* **AWS CLI** configured with your credentials (`aws configure`).
 * **Git**.
 
 ---
 
-## 🚀 Despliegue Inicial (Paso a Paso)
+## 🚀 Initial Deployment (Step-by-Step)
 
-### 1. Clonar el repositorio
+### 1. Clone the repository
 ```bash
-git clone https://github.com/AlejandroCarbajalHernandez/aws-image-optimizer.git
+git clone [https://github.com/AlejandroCarbajalHernandez/aws-image-optimizer.git](https://github.com/AlejandroCarbajalHernandez/aws-image-optimizer.git)
 cd webpConversion
-code . 
+code .
 
-# Limpia builds anteriores
+# Remember to change the name of the s3 bucket to one you like in variables.tf
+# Clean previous builds
 rm -rf build/lambda_function.zip
 mkdir -p build
 
-# Compila usando arquitectura Linux x86_64
+# Compile using Linux x86_64 architecture (required for AWS Lambda)
 docker run --rm --platform linux/amd64 \
   -v "$(pwd)/lambda_src":/var/task \
   -v "$(pwd)/build":/build \
   public.ecr.aws/sam/build-python3.11:latest \
   /bin/sh -c "pip install --upgrade --force-reinstall -r requirements.txt -t . && zip -r /build/lambda_function.zip ."
   
+# Initialize Terraform
 terraform init 
-terraform plan 
-terraform apply --auto-approve
 
+# Verify the execution plan
+terraform plan 
+
+# Apply changes to deploy infrastructure
+terraform apply --auto-approve
